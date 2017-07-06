@@ -1,22 +1,18 @@
 package com.chartiq.chartiqsample;
 
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.database.DataSetObserver;
 import android.graphics.Color;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.support.v4.content.res.ResourcesCompat;
-import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.ListPopupWindow;
 import android.support.v7.widget.RecyclerView;
 import android.text.Editable;
 import android.text.InputFilter;
-import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -34,28 +30,19 @@ import android.widget.ListAdapter;
 import android.widget.PopupWindow;
 import android.widget.TextView;
 
+import com.chartiq.chartiqsample.studies.StudiesActivity;
 import com.chartiq.sdk.ChartIQ;
 import com.chartiq.sdk.Promise;
 import com.chartiq.sdk.User;
 import com.chartiq.sdk.model.OHLCChart;
 import com.chartiq.sdk.model.Study;
-import com.chartiq.chartiqsample.studies.StudiesActivity;
-import com.google.gson.Gson;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Date;
-import java.util.List;
-import java.util.Map;
 import java.util.HashMap;
-import java.util.TimeZone;
+import java.util.List;
 
 import static com.chartiq.chartiqsample.studies.StudiesActivity.ACTIVE_STUDIES;
 import static com.chartiq.chartiqsample.studies.StudiesActivity.STUDIES_LIST;
@@ -67,7 +54,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int CHART_OPTIONS_REQUEST_CODE = 3;
     private static final int REFRESH_INTERVAL = 1;
     private static final String defaultSymbol = "AAPL";
-    public static final String chartUrl = "http://yourdeployment/template-native-sdk.html";
+    public static final String chartUrl = "http://wildflydevgr.tradingpoint.com:18080/chartiq/template-native-sdk.html";
     public static final String rokoApiKey = "";
     public static final String rokoUserName = "";
     ChartIQ chartIQ;
@@ -140,35 +127,21 @@ public class MainActivity extends AppCompatActivity {
         chartIQ.setRefreshInterval(REFRESH_INTERVAL);
         symbolInput.setText(defaultSymbol);
 
-        chartIQ.setDataSource(new ChartIQ.DataSource() {
-            @Override
-            public void pullInitialData(Map<String, Object> params, ChartIQ.DataSourceCallback callback) {
-                loadChartData(params, callback);
-            }
-
-            @Override
-            public void pullUpdateData(Map<String, Object> params, ChartIQ.DataSourceCallback callback) {
-                loadChartData(params, callback);
-            }
-
-            @Override
-            public void pullPaginationData(Map<String, Object> params, ChartIQ.DataSourceCallback callback) {
-                loadChartData(params, callback);
-            }
-        });
-
         chartIQ.start(rokoApiKey, chartUrl, new ChartIQ.CallbackStart() {
             @Override
             public void onStart() {
                 ChartIQ.setUser(rokoUserName, new ChartIQ.SetUserCallback() {
                     @Override
                     public void onSetUser(User user) {
-                        chartIQ.setDataMethod(ChartIQ.DataMethod.PULL, defaultSymbol);
+                        chartIQ.setDataMethod(ChartIQ.DataMethod.PUSH, defaultSymbol);
                         chartIQ.setSymbol(defaultSymbol);
                     }
                 });
             }
         });
+
+        pushInitialData();
+        pushUpdateData();
 
         chartIQ.setShowDebugInfo("debug".equals(BuildConfig.BUILD_TYPE));
         chartIQ.setOnTouchListener(new HideKeyboardOnTouchListener());
@@ -305,6 +278,26 @@ public class MainActivity extends AppCompatActivity {
         }));
     }
 
+    private void pushInitialData(){
+        Calendar cal = Calendar.getInstance();
+        Date today = cal.getTime();
+        cal.add(Calendar.DAY_OF_MONTH, -1);
+        Date yesterday = cal.getTime();
+        OHLCChart dataSample1 = new OHLCChart(today, 1.5, 1.10, 0.95, 0.94, 0, 0);
+        OHLCChart dataSample2 = new OHLCChart(yesterday, 1.35, 1.40, 1.25, 1.34, 0, 0);
+        OHLCChart[] chartData = new OHLCChart[]{dataSample1, dataSample2};
+        chartIQ.pushData(defaultSymbol, chartData);
+    }
+
+    private void pushUpdateData(){
+        Calendar cal = Calendar.getInstance();
+        cal.add(Calendar.DAY_OF_MONTH, -2);
+        Date dayBeforeYesterday = cal.getTime();
+        OHLCChart dataSample = new OHLCChart(dayBeforeYesterday, 1.1, 0.80, 0.75, 0.74, 0, 0);
+        OHLCChart[] chartData = new OHLCChart[]{dataSample};
+        chartIQ.pushUpdate(defaultSymbol, chartData);
+    }
+
     private void showFillColorPalette() {
         if (fillColorPalette.isShowing()) {
             fillColorPalette.dismiss();
@@ -348,103 +341,6 @@ public class MainActivity extends AppCompatActivity {
         crosshair = (ImageView) findViewById(R.id.crosshair);
     }
 
-    private void loadChartData(Map<String, Object> params, final ChartIQ.DataSourceCallback callback) {
-        if(!params.containsKey("start") || params.get("start") == null || "".equals(params.get("start"))) {
-            params.put("start", "2016-12-16T16:00:00.000Z");
-        }
-
-        if(params.containsKey("end") || "".equals(params.get("start"))) {
-            TimeZone tz = TimeZone.getTimeZone("UTC");
-            DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'");
-            df.setTimeZone(tz);
-            String endDate = df.format(new Date());
-            params.put("end", endDate);
-        }
-
-        boolean isMinute = params.containsKey("interval") && TextUtils.isDigitsOnly(String.valueOf(params.get("interval")));
-        params.put("interval", isMinute ? "minute" : params.get("interval"));
-        params.put("period", isMinute ? interval : params.get("period"));
-
-        StringBuilder builder = new StringBuilder();
-        builder.append("http://simulator.chartiq.com/datafeed?");
-        builder.append("identifier=" + params.get("symbol"));
-        builder.append("&startdate=" + params.get("start"));
-        if (params.containsKey("end")) {
-            builder.append("&enddate=" + params.get("end"));
-        }
-        builder.append("&interval=" + params.get("interval"));
-        builder.append("&period=" + params.get("period"));
-        builder.append("&seed=1001");
-
-        final String url = builder.toString();
-        final String symbol = String.valueOf(params.get("symbol"));
-        new AsyncTask<Void, Void, String>() {
-            @Override
-            protected String doInBackground(Void... params) {
-                String body = "";
-                try {
-                    URL connectionUrl = new URL(url);
-                    HttpURLConnection connection = (HttpURLConnection) connectionUrl.openConnection();
-                    connection.setRequestMethod("GET");
-                    connection.setRequestProperty("Content-Type", "application/json");
-                    connection.connect();
-                    int code = connection.getResponseCode();
-
-                    InputStream is;
-                    StringBuilder builder;
-                    if (code >= 200 && code < 400) {
-                        builder = new StringBuilder();
-                        is = connection.getInputStream();
-                    } else {
-                        is = connection.getErrorStream();
-                        builder = new StringBuilder("Error("+code+"): ");
-                    }
-                    if (is != null) {
-                        BufferedReader reader = new BufferedReader(new InputStreamReader(is));
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            builder.append(line);
-                        }
-                        body = builder.toString();
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                return body;
-            }
-
-            @Override
-            protected void onPostExecute(String body) {
-                if(body.startsWith("Error")){
-                    AlertDialog invalidSymbolAlert = new AlertDialog.Builder(MainActivity.this)
-                            .setTitle(body)
-                            .setCancelable(true)
-                            .setPositiveButton("OK", new DialogInterface.OnClickListener() {
-                                public void onClick(DialogInterface dialog, int id) {
-                                    dialog.dismiss();
-                                }
-                            }).create();
-                    invalidSymbolAlert.show();
-                } else if ("invalid symbol".equals(body)) {
-                    AlertDialog invalidSymbolAlert = new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("Invalid symbol")
-                            .setCancelable(true)
-                            .setPositiveButton("OK", new DialogInterface.OnClickListener() {
-                                public void onClick(DialogInterface dialog, int id) {
-                                    dialog.dismiss();
-                                }
-                            }).create();
-                    invalidSymbolAlert.show();
-                } else {
-                    data = new Gson().fromJson(body, OHLCChart[].class);
-                    callback.execute(data);
-                }
-
-                chartLoaded = true;
-
-            }
-        }.execute((Void[]) null);
-    }
 
     private void showPopupMenu() {
         final ListPopupWindow popupWindow = new ListPopupWindow(this);
